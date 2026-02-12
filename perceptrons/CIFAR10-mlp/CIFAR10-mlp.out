@@ -1,0 +1,17 @@
+
+
+## Reporting ##
+Parameters:
+    Name:              CIFAR10-mlp
+    Dep. Dim.:         3
+    Row Dim.:          32
+    Col. Dim.:         32
+    Out Dim.:          10
+    Layers:            ListWrapper([32, 10])
+    Init.:             Training
+
+Metrics:
+    Train Loss:        1.8942
+    Train Accuracy:    0.3371
+    Test Loss:         1.8913
+    Test Accuracy:     0.3414
