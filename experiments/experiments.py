@@ -10,6 +10,8 @@ import perceptrons.multilayer as mlp
 import perceptrons.convex as conv
 
 import geometry.interval as interval
+import geometry.norms as norms
+import geometry.circle as circle
 
 class ConvApproxError:
     """
@@ -41,7 +43,8 @@ class ConvApproxError:
             max_width:      int             = 50,
             num_samples:    int             = 1000,
             num_classes:    int             = 10,
-            seed:           int             = 0
+            seed:           int             = 0,
+            rad:            float           = None
         ) -> None:
         """
             **Inputs:**
@@ -70,6 +73,7 @@ class ConvApproxError:
         self.num_samples    = num_samples
         self.num_classes    = num_classes
         self.seed           = seed
+        self.rad            = rad
 
         self.in_dim         = np.prod(self.in_shape)
 
@@ -111,11 +115,23 @@ class ConvApproxError:
                         self.seed,
                         "mlp-" + str(ind)
                     )
-            conv_mlp = conv.ConvexApprox(
-                        relu_mlp,
-                        self.input_domain
-                    )
             
+            conv_mlp = None
+            if self.rad is not None:
+                B_rad = circle.InfCircle(
+                    np.zeros(self.in_shape),
+                    self.rad
+                ).get_interval()
+                conv_mlp = conv.ConvexApprox(
+                    relu_mlp,
+                    B_rad
+                )
+            else:
+                conv_mlp = conv.ConvexApprox(
+                    relu_mlp,
+                    self.input_domain
+                )
+
             self.relu_mlps.append(relu_mlp)
             self.conv_mlps.append(conv_mlp)
             ind += 1
@@ -131,22 +147,44 @@ class ConvApproxError:
         
 
         ## Statistics
-        self.avg_tight_divergences          = []
-        self.worst_lb_tight_divergences     = []
-        self.worst_ub_tight_divergences     = []
-        self.avg_misclassifications         = []
-        self.avg_misclassification_class    = np.zeros((self.num_mlps, self.num_classes))
-        self.class_relu_distribution        = np.zeros((self.num_mlps, self.num_classes))
-        self.class_conv_distribution        = np.zeros((self.num_mlps, self.num_classes))
+        # Divergemce between ReLU and Conv. Scores
+        # absolute values
+        self.diffs_vecs                         = []
+        self.avg_tight_divergences              = []
+
+        # normalized values for diff in diffs
+        # diff_norm <-- diff / ||diff||_{+oo}
+        self.diffs_vecs_norm                    = []
+        self.avg_tight_divergences_norm         = []
+
+
+        # Worst Case Lower Bounds
+        # absolute values
+        self.worst_lb_vecs                      = []
+        self.worst_lb_tight_divergences         = []
+
+        # normalized values for lb_vec in lb_vecs
+        # lb_vec_norm <-- lb_vec / ||lb_vec||_{+oo}
+        self.worst_lb_vecs_norm                 = []
+        self.worst_lb_tight_divergences_norm    = []
+
+
+        # Worst Case Upper Bounds
+        # absolute values
+        self.worst_ub_vecs                      = []
+        self.worst_ub_tight_divergences         = []
+        
+        # normalized values for ub_vec in ub_vecs
+        # ub_vec_norm <-- ub_vec / ||ub_vec||_{+oo}
+        self.worst_ub_vecs_norm                 = []
+        self.worst_ub_tight_divergences_norm    = []
+        
 
         ## States
         self.avg_tight_divergence_computed          = False
         self.worst_lb_tight_divergence_computed     = False
         self.worst_ub_tight_divergence_computed     = False
-        self.avg_misclassification_computed         = False
-        self.avg_misclassification_class_computed   = False
-        self.class_relu_distribution_computed       = False
-        self.class_conv_distribution_computed       = False
+        
 
     ##########
     # Report #
@@ -201,15 +239,18 @@ class ConvApproxError:
         if self.avg_tight_divergence_computed: return self.avg_tight_divergences
 
         for i in tqdm(range(self.num_mlps)):
-            tight_divergence       = np.max(
-                np.abs(
-                    self.relu_scores[i] - self.conv_scores[i]
-                ),
-                0
-            )
+            # compute diffs
+            diff_vec = self.relu_scores[i] - self.conv_scores[i]
+            self.diffs_vecs.append(diff_vec)
             
+            # compute tight divergence
+            #tight_divergence       = np.max(np.abs(diff_vec), 0)
+            tight_divergence       = norms.inf_norm(diff_vec)
+            
+            # compute new average
             avg_tight_divergence   = np.sum(tight_divergence) / len(tight_divergence)
             
+            # append average
             self.avg_tight_divergences.append(avg_tight_divergence)
         
         self.avg_tight_divergence_computed = True
@@ -269,31 +310,31 @@ class ConvApproxError:
         return self.worst_ub_tight_divergences
 
 
-    def comp_avg_misclassification(self) -> t.List[float]:
-        """
-            Computing the metric:
-            ```
-                AvgMisClass = Sum_{x \in D} 1I[z(x) != s(x)]
-            ```
-            where `D` is the set of random samples drawn from the input
-            domain `[-1, 1]^d`. Above `z` is output of the original MLP,
-            and `s` is the output of the Tight Convex Approximation.
-        """
-        # if self.avg_misclassification_computed: return self.avg_misclassifications
+    # def comp_avg_misclassification(self) -> t.List[float]:
+    #     """
+    #         Computing the metric:
+    #         ```
+    #             AvgMisClass = Sum_{x \in D} 1I[z(x) != s(x)]
+    #         ```
+    #         where `D` is the set of random samples drawn from the input
+    #         domain `[-1, 1]^d`. Above `z` is output of the original MLP,
+    #         and `s` is the output of the Tight Convex Approximation.
+    #     """
+    #     # if self.avg_misclassification_computed: return self.avg_misclassifications
 
-        self.relu_preds = np.argmax(self.relu_scores, axis=2)
-        self.conv_preds = np.argmax(self.conv_scores, axis=2)
+    #     self.relu_preds = np.argmax(self.relu_scores, axis=2)
+    #     self.conv_preds = np.argmax(self.conv_scores, axis=2)
 
-        for i in tqdm(range(self.num_mlps)):
-            misclassification      =\
-                np.array(self.relu_preds[i]) != np.array(self.conv_preds[i])
+    #     for i in tqdm(range(self.num_mlps)):
+    #         misclassification      =\
+    #             np.array(self.relu_preds[i]) != np.array(self.conv_preds[i])
             
-            avg_misclassification  = np.sum(misclassification) / len(misclassification)
+    #         avg_misclassification  = np.sum(misclassification) / len(misclassification)
             
-            self.avg_misclassifications.append(avg_misclassification)
+    #         self.avg_misclassifications.append(avg_misclassification)
         
-        self.avg_misclassification = True
-        return self.avg_misclassifications
+    #     self.avg_misclassification = True
+    #     return self.avg_misclassifications
 
     # def comp_avg_misclassification_class(self) ->np.ndarray:
     #     if self.avg_misclassification_class_computed: return self.avg_misclassification_class
